@@ -590,7 +590,12 @@
     } else if (d.type === 'admin-mute') {
       if (d.muted) {
         isAdminMuted = true;
-        if (isMicOn) toggleMic();
+        // seedha track band karo (toggleMic block hoga kyunki isAdminMuted true hai)
+        if (myAudioTrack) myAudioTrack.enabled = false;
+        isMicOn = false;
+        $('btnMic').textContent = '🔇 Mic: OFF';
+        $('btnMic').className = 'off';
+        renderMembers();
         toast('👑 Admin ne aapka mic mute kar diya');
       } else {
         isAdminMuted = false;
