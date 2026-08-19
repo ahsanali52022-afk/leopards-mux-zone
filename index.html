@@ -1041,7 +1041,7 @@
       button:hover { background:#ef4444; }
     </style></head>
     <body>
-      <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen();">⏹ Stop Sharing</button></div>
+      <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen(); window.close();">⏹ Stop Sharing</button></div>
       <video autoplay muted playsinline></video>
       <script>
         // window close hone par sharing stop
@@ -1094,20 +1094,22 @@
   }
 
   function stopScreen() {
-    if (!isScreenOn) return;
-    Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
-    screenCalls = {};
-    broadcast({ type: 'screen-stop' });
-    if (screenStream) {
-      screenStream.getTracks().forEach(t => t.stop());
-      screenStream = null;
-    }
+    // popup band hote waqt dobara call ho sakta hai — pehle hi reset karo
     isScreenOn = false;
     clearInterval(screenWinCheckTimer);
+    Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
+    screenCalls = {};
+    try { broadcast({ type: 'screen-stop' }); } catch(e) {}
+    if (screenStream) {
+      try { screenStream.getTracks().forEach(t => t.stop()); } catch(e) {}
+      screenStream = null;
+    }
     $('btnScreen').textContent = '🖥 Screen Share';
     $('btnScreen').className = '';
-    if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
-    screenWin = null;
+    if (screenWin) {
+      try { screenWin.close(); } catch(e) {}
+      screenWin = null;
+    }
     detachScreenTile('mine');
     toast('Screen sharing OFF');
   }
@@ -1115,23 +1117,18 @@
   // meeting khatam karo — sab ko batao aur yeh page se bahar nikal jao
   function endMeeting() {
     if (!confirm('Meeting end karni hai? Sab participants disconnect ho jayenge.')) return;
-    // link turant expire karo
-    expireRoom(roomId);
-    // sabko end ka message bhejo
-    broadcast({ type: 'meeting-end' });
-    // screen share band karo
-    if (isScreenOn) stopScreen();
-    // sab streams band karo
-    if (myStream) { myStream.getTracks().forEach(t => t.stop()); myStream = null; }
-    if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
-    // sab connections band karo
-    Object.values(connections).forEach(c => { try { c.close(); } catch(e) {} });
-    Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
-    if (peer) { try { peer.destroy(); } catch(e) {} }
-    clearInterval(heartbeatTimer);
-    // join screen wapas dikhao
+    try { expireRoom(roomId); } catch(e) {}
+    try { broadcast({ type: 'meeting-end' }); } catch(e) {}
+    try { if (isScreenOn) stopScreen(); } catch(e) {}
+    try { if (myStream) { myStream.getTracks().forEach(t => t.stop()); myStream = null; } } catch(e) {}
+    try { if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; } } catch(e) {}
+    try { Object.values(connections).forEach(c => { try { c.close(); } catch(e) {} }); } catch(e) {}
+    try { Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} }); } catch(e) {}
+    try { if (peer) { try { peer.destroy(); } catch(e) {} } } catch(e) {}
+    try { clearInterval(heartbeatTimer); } catch(e) {}
+    // join screen wapas dikhao — fail-safe
     location.hash = '';
-    location.reload();
+    location.replace(location.pathname + location.search);
   }
 
   function copyLink() {
