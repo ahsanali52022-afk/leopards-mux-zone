@@ -225,7 +225,7 @@
         <button id="btnCam" onclick="toggleCam()">📷 Cam: ON</button>
         <button id="btnHand" class="raise" onclick="toggleHand()">🙋 Raise Hand</button>
         <button id="btnScreen" onclick="toggleScreen()">🖥 Screen Share</button>
-        <button id="btnEnd" onclick="endMeeting()" style="background:#dc2626;color:#fff;font-weight:700;">⏹ End Meeting</button>
+        <button id="btnEnd" onclick="endMeeting()" style="background:#dc2626;color:#fff;font-weight:700;display:none;">⏹ End Meeting</button>
       </div>
     </div>
 
@@ -711,6 +711,7 @@
   // ---- UI ----
   function updateRoomStatus() {
     $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b> ${isAdmin ? '👑 Admin' : ''}`;
+    $('btnEnd').style.display = isAdmin ? 'block' : 'none';
   }
 
   function renderMembers() {
