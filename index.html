@@ -198,6 +198,15 @@
 </head>
 <body>
 
+<div class="join-screen" id="endedScreen" style="display:none;">
+  <div class="join-box" style="text-align:center;">
+    <h2>🔴 Meeting Ended</h2>
+    <p style="margin:10px 0 18px;">Ye meeting khatam ho chuki hai. App band ho gaya.</p>
+    <button onclick="window.close()" style="background:#dc2626;color:#fff;">❌ Close App</button>
+    <p style="margin-top:14px;font-size:12px;color:#94a3b8;">Aap ye window/tab ab band kar sakte hain.</p>
+  </div>
+</div>
+
 <div class="join-screen" id="joinScreen">
   <div class="join-box">
     <h2>🐆 Leopards MUX Zone Room</h2>
@@ -727,10 +736,10 @@
       receivingScreen[id] = false;
       detachScreenTile(id);
     } else if (d.type === 'meeting-end') {
-      // host ne meeting khatam kardi — link expire
+      // host ne meeting khatam kardi — link expire + ended screen
       expireRoom(roomId);
       toast('👋 Host ne meeting end kar di');
-      setTimeout(() => { location.hash = ''; location.reload(); }, 2000);
+      setTimeout(() => { showEndedScreen(); }, 1500);
     } else if (d.type === 'chat') {
       const meta = memberMeta[id] || { name: 'Member' };
       addChat(meta.name, d.text);
@@ -1126,9 +1135,13 @@
     try { Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} }); } catch(e) {}
     try { if (peer) { try { peer.destroy(); } catch(e) {} } } catch(e) {}
     try { clearInterval(heartbeatTimer); } catch(e) {}
-    // join screen wapas dikhao — fail-safe
-    location.hash = '';
-    location.replace(location.pathname + location.search);
+    // meeting ended screen dikhao — link page na aaye
+    showEndedScreen();
+  }
+
+  function showEndedScreen() {
+    $('joinScreen').style.display = 'none';
+    $('endedScreen').style.display = 'flex';
   }
 
   function copyLink() {
