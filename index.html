@@ -131,6 +131,18 @@
     background: rgba(0,0,0,0.7); padding: 2px 10px; border-radius: 6px; font-size: 12px;
   }
 
+  #videoTiles { display: flex; flex-wrap: wrap; gap: 8px; max-height: 320px; overflow-y: auto; }
+  .video-tile { position: relative; width: 160px; height: 110px; background: #0f172a; border-radius: 10px; overflow: hidden; border: 2px solid #334155; }
+  .video-tile video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+  .video-tile .label {
+    position: absolute; bottom: 4px; left: 6px;
+    background: rgba(0,0,0,0.7); padding: 2px 8px; border-radius: 6px; font-size: 11px;
+  }
+  .video-tile .no-video {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 32px; background: #1e293b;
+  }
+
   .join-screen {
     position: fixed; inset: 0;
     background: #0f172a;
@@ -210,9 +222,9 @@
       <h2>🎛 Controls</h2>
       <div class="controls">
         <button id="btnMic" onclick="toggleMic()">🎤 Mic: ON</button>
+        <button id="btnCam" onclick="toggleCam()">📷 Cam: ON</button>
         <button id="btnHand" class="raise" onclick="toggleHand()">🙋 Raise Hand</button>
         <button id="btnScreen" onclick="toggleScreen()">🖥 Screen Share</button>
-        <button onclick="copyLink()">🔗 Copy Room Link</button>
       </div>
     </div>
 
@@ -223,6 +235,11 @@
   </div>
 
   <div class="right">
+    <div class="panel video-area" id="videoArea">
+      <h2>🎥 Video</h2>
+      <div id="videoTiles"></div>
+    </div>
+
     <div class="panel screen-area" id="screenArea">
       <h2>🖥 Shared Screens</h2>
       <div id="screenTiles"></div>
@@ -261,8 +278,10 @@
   let myName = '';
   let myStream = null;
   let myAudioTrack = null;
+  let myVideoTrack = null;
   let screenStream = null;
   let isMicOn = true;
+  let isCamOn = true;
   let isScreenOn = false;
   let handRaised = false;
   let isAdminMuted = false;
@@ -272,6 +291,7 @@
   const screenCalls = {};       // peerId -> screen call (sharer side)
   const memberMeta = {};        // peerId -> {name, muted, hand}
   const receivingScreen = {};   // peerId -> bool
+  const videoStreams = {};      // peerId -> video stream
 
   let isAdmin = false;          // room host (admin)
   let originalHostName = '';    // pehle host ka naam (wapis aye to host wapas mile)
@@ -337,12 +357,13 @@
     try {
       myStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false
+        video: { width: { ideal: 640 }, height: { ideal: 360 } }
       });
       myAudioTrack = myStream.getAudioTracks()[0] || null;
+      myVideoTrack = myStream.getVideoTracks()[0] || null;
     } catch (e) {
-      myStream = null; myAudioTrack = null;
-      toast('Mic nahi mili — text mode mein join ho gaye');
+      myStream = null; myAudioTrack = null; myVideoTrack = null;
+      toast('Mic/Camera nahi mili — text mode mein join ho gaye');
     }
     $('joinScreen').style.display = 'none';
     setupPeer();
@@ -361,6 +382,7 @@
       updateRoomStatus();
       renderMembers();
       loadNotes();
+      addLocalVideoTile();
       addChat('', `You created the room (${roomId}) — Aap admin hain 👑`, true);
       startHeartbeat();
     });
@@ -389,10 +411,11 @@
       updateRoomStatus();
       addChat('', `Joined room (${roomId})`, true);
       loadNotes();
+      addLocalVideoTile();
       const conn = peer.connect(roomId); // host se connect
       conn.on('open', () => {
         onConnected(conn);
-        conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+        conn.send({ type: 'hello', name: myName, muted: !isMicOn, camOn: isCamOn, hand: handRaised });
         if (amOriginalHost) conn.send({ type: 'request-host', hostKey, name: myName });
       });
       conn.on('data', (d) => handleData(d, conn));
@@ -420,6 +443,7 @@
       amOriginalHost = false;
       updateRoomStatus();
       renderMembers();
+      addLocalVideoTile();
       addChat('', 'Aap naye host ban gaye (admin) 👑', true);
       startHeartbeat();
     });
@@ -429,7 +453,7 @@
         const c = newPeer.connect(roomId);
         c.on('open', () => {
           onConnected(c);
-          c.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+          c.send({ type: 'hello', name: myName, muted: !isMicOn, camOn: isCamOn, hand: handRaised });
           if (amOriginalHost) c.send({ type: 'request-host', hostKey, name: myName });
         });
         c.on('data', (d) => handleData(d, c));
@@ -482,7 +506,7 @@
       const c = peer.connect(roomId); // original host se connect
       c.on('open', () => {
         onConnected(c);
-        c.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+        c.send({ type: 'hello', name: myName, muted: !isMicOn, camOn: isCamOn, hand: handRaised });
       });
       c.on('data', (d) => handleData(d, c));
       startHostWatch();
@@ -498,11 +522,14 @@
 
   function onConnected(conn) {
     connections[conn.peer] = conn;
-    conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised, isAdmin, hostKey: isAdmin ? hostKey : '' });
+    conn.send({ type: 'hello', name: myName, muted: !isMicOn, camOn: isCamOn, hand: handRaised, isAdmin, hostKey: isAdmin ? hostKey : '' });
     if (myStream) {
       const call = peer.call(conn.peer, myStream);
       call.on('stream', (s) => attachAudio(conn.peer, s));
-      call.on('close', () => detachAudio(conn.peer));
+      call.on('close', () => {
+        detachAudio(conn.peer);
+        removeVideoTile(conn.peer);
+      });
     }
     renderMembers();
   }
@@ -515,11 +542,20 @@
     } else {
       call.answer(myStream || undefined);
       call.on('stream', (s) => {
-        if (s.getVideoTracks().length > 0) attachScreenTile(call.peer, s);
-        else attachAudio(call.peer, s);
+        if (s.getVideoTracks().length > 0) {
+          // video call
+          addRemoteVideoTile(call.peer, s);
+          attachAudio(call.peer, s);
+        } else {
+          attachAudio(call.peer, s);
+        }
       });
     }
-    call.on('close', () => { detachAudio(call.peer); detachScreenTile(call.peer); });
+    call.on('close', () => {
+      detachAudio(call.peer);
+      detachScreenTile(call.peer);
+      removeVideoTile(call.peer);
+    });
   }
 
   function handleData(d, conn) {
@@ -532,8 +568,15 @@
     } else if (d.type === 'state') {
       if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
       memberMeta[id].muted = d.muted;
+      memberMeta[id].camOn = d.camOn;
       memberMeta[id].hand = d.hand;
       renderMembers();
+      // remote video tile hide/show
+      const vt = document.getElementById('video-' + id);
+      if (vt) {
+        const v = vt.querySelector('video');
+        if (v) v.style.display = d.camOn === false ? 'none' : 'block';
+      }
     } else if (d.type === 'admin-mute') {
       if (d.muted) {
         isAdminMuted = true;
@@ -584,6 +627,49 @@
     if (el) { el.srcObject = null; el.remove(); }
     delete audioEls[id];
     renderMembers();
+  }
+
+  function addLocalVideoTile() {
+    removeVideoTile('me');
+    const tile = document.createElement('div');
+    tile.className = 'video-tile';
+    tile.id = 'video-me';
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.id = 'video-me-el';
+    if (myStream) video.srcObject = myStream;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = myName + ' (You)';
+    tile.appendChild(video);
+    tile.appendChild(label);
+    $('videoTiles').appendChild(tile);
+  }
+
+  function addRemoteVideoTile(id, stream) {
+    removeVideoTile(id);
+    videoStreams[id] = stream;
+    const tile = document.createElement('div');
+    tile.className = 'video-tile';
+    tile.id = 'video-' + id;
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = memberMeta[id] ? memberMeta[id].name : 'Member';
+    tile.appendChild(video);
+    tile.appendChild(label);
+    $('videoTiles').appendChild(tile);
+  }
+
+  function removeVideoTile(id) {
+    const el = document.getElementById('video-' + id);
+    if (el) el.remove();
+    delete videoStreams[id];
   }
 
   function attachScreenTile(id, stream) {
@@ -666,6 +752,20 @@
     $('btnMic').className = isMicOn ? '' : 'off';
     broadcast({ type: 'state', muted: !isMicOn, hand: handRaised });
     renderMembers();
+  }
+
+  function toggleCam() {
+    if (!myVideoTrack) { toast('Camera available nahi'); return; }
+    isCamOn = !isCamOn;
+    myVideoTrack.enabled = isCamOn;
+    $('btnCam').textContent = isCamOn ? '📷 Cam: ON' : '🚫 Cam: OFF';
+    $('btnCam').className = isCamOn ? '' : 'off';
+    const me = $('video-me-el');
+    if (me) {
+      if (isCamOn) me.style.display = 'block';
+      else me.style.display = 'none';
+    }
+    broadcast({ type: 'state', muted: !isMicOn, camOn: isCamOn, hand: handRaised });
   }
 
   function toggleHand() {
