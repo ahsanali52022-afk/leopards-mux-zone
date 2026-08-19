@@ -542,8 +542,11 @@
     } else {
       call.answer(myStream || undefined);
       call.on('stream', (s) => {
-        if (s.getVideoTracks().length > 0) {
-          // video call
+        // video-only stream = screen share, audio+video = video call
+        const hasAudio = s.getAudioTracks().length > 0;
+        if (!hasAudio && s.getVideoTracks().length > 0) {
+          attachScreenTile(call.peer, s);
+        } else if (s.getVideoTracks().length > 0) {
           addRemoteVideoTile(call.peer, s);
           attachAudio(call.peer, s);
         } else {
@@ -597,6 +600,11 @@
       if (isAdmin && d.hostKey && d.hostKey === hostKey && d.name === originalHostName) {
         giveHostBack(conn);
       }
+    } else if (d.type === 'screen-start') {
+      receivingScreen[id] = true;
+    } else if (d.type === 'screen-stop') {
+      receivingScreen[id] = false;
+      detachScreenTile(id);
     } else if (d.type === 'chat') {
       const meta = memberMeta[id] || { name: 'Member' };
       addChat(meta.name, d.text);
@@ -779,34 +787,26 @@
   async function toggleScreen() {
     if (isScreenOn) { stopScreen(); return; }
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      // audio:false — system audio off (echo fix). Awaz mic se hi jayegi
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       isScreenOn = true;
       $('btnScreen').textContent = '🖥 Stop Share';
       $('btnScreen').className = 'off';
       toast('Screen sharing ON');
 
-      const area = $('screenArea');
-      area.classList.add('active');
-      const tile = document.createElement('div');
-      tile.className = 'screen-tile';
-      tile.id = 'screen-mine';
-      const video = document.createElement('video');
-      video.autoplay = true;
-      video.muted = true;
-      video.playsInline = true;
-      video.srcObject = screenStream;
-      const label = document.createElement('div');
-      label.className = 'label';
-      label.textContent = '🖥 ' + myName + ' (You)';
-      tile.appendChild(video);
-      tile.appendChild(label);
-      $('screenTiles').appendChild(tile);
-
+      // har peer ko batao ke ye screen call hai (echo/double-audio fix)
       Object.keys(connections).forEach((pid) => {
+        try { connections[pid].send({ type: 'screen-start' }); } catch(e) {}
         const call = peer.call(pid, screenStream);
         screenCalls[pid] = call;
-        call.on('close', () => { delete screenCalls[pid]; });
+        call.on('close', () => {
+          delete screenCalls[pid];
+          try { connections[pid].send({ type: 'screen-stop' }); } catch(e) {}
+        });
       });
+
+      // alag window mein screen dikhao (Zoom jaisa)
+      openScreenWindow();
 
       screenStream.getVideoTracks()[0].onended = () => stopScreen();
     } catch (e) {
@@ -814,10 +814,58 @@
     }
   }
 
+  // screen share alag window mein (Zoom ki tarah)
+  let screenWin = null;
+  function openScreenWindow() {
+    if (screenWin && !screenWin.closed) { screenWin.close(); }
+    screenWin = window.open('', 'lmzScreen', 'width=900,height=600,resizable=yes');
+    if (!screenWin) { toast('Popup block — screen yahan dikhegi'); addLocalScreenTile(); return; }
+    const html = `<html><head><title>🖥 Screen Share — ${escapeHtml(myName)}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f172a; color:#e2e8f0; font-family:'Segoe UI',sans-serif; height:100vh; display:flex; flex-direction:column; }
+      video { flex:1; width:100%; object-fit:contain; background:#000; }
+      .bar { background:#1e293b; padding:10px 16px; display:flex; align-items:center; justify-content:space-between; }
+      .bar h2 { font-size:14px; }
+      button { background:#dc2626; color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:14px; cursor:pointer; }
+      button:hover { background:#ef4444; }
+    </style></head>
+    <body>
+      <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen(); window.close();">⏹ Stop Sharing</button></div>
+      <video autoplay muted playsinline></video>
+      <script>
+        const v = document.querySelector('video');
+        v.srcObject = window.opener.screenStream;
+      <\/script>
+    </body></html>`;
+    screenWin.document.write(html);
+    screenWin.document.close();
+  }
+
+  function addLocalScreenTile() {
+    const area = $('screenArea');
+    area.classList.add('active');
+    const tile = document.createElement('div');
+    tile.className = 'screen-tile';
+    tile.id = 'screen-mine';
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = screenStream;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = '🖥 ' + myName + ' (You)';
+    tile.appendChild(video);
+    tile.appendChild(label);
+    $('screenTiles').appendChild(tile);
+  }
+
   function stopScreen() {
     if (!isScreenOn) return;
     Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
     screenCalls = {};
+    broadcast({ type: 'screen-stop' });
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
       screenStream = null;
@@ -825,6 +873,8 @@
     isScreenOn = false;
     $('btnScreen').textContent = '🖥 Screen Share';
     $('btnScreen').className = '';
+    if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
+    screenWin = null;
     detachScreenTile('mine');
     toast('Screen sharing OFF');
   }
