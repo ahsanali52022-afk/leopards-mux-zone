@@ -330,7 +330,7 @@
 
   // ----- link/share -----
   function buildUrl() {
-    const room = $('joinRoom').value.trim() || 'leopards-zone';
+    const room = $('joinRoom').value.trim() || roomId;
     $('joinRoom').value = room;
     return location.href.split('#')[0] + '#room=' + encodeURIComponent(room) + '&host=' + hostKey;
   }
@@ -636,10 +636,19 @@
     if (!el) {
       el = document.createElement('audio');
       el.autoplay = true;
+      el.playsInline = true;
       audioEls[id] = el;
       document.body.appendChild(el);
     }
     el.srcObject = stream;
+    el.muted = false;
+    const playPromise = el.play();
+    if (playPromise) playPromise.catch(() => {
+      // browser autoplay block kar de to first click par chala do
+      const resume = () => { el.play().catch(()=>{}); };
+      document.addEventListener('click', resume, { once: true });
+      document.addEventListener('keydown', resume, { once: true });
+    });
   }
   function detachAudio(id) {
     const el = audioEls[id];
@@ -980,9 +989,13 @@
       const stored = localStorage.getItem('lmz-owner-' + room);
       if (hostKey && stored === hostKey) amOriginalHost = true;
     } else {
-      $('joinRoom').value = 'leopards-zone';
+      // random unique room banao taake sab same room mein jayen (collision se bachao)
+      const rid = 'lmz-' + Math.random().toString(36).slice(2,6) + '-' + Math.random().toString(36).slice(2,6);
+      $('joinRoom').value = rid;
       hostKey = genKey();
       amOriginalHost = true;
+      // room URL mein daal do taake copy hone par sab ek hi room mein aayen
+      history.replaceState(null, '', location.pathname + '#room=' + rid + '&host=' + hostKey);
     }
   });
 
