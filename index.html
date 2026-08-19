@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leopards MUX Zone Room</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: #1e293b;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 { font-size: 18px; }
+  #roomStatus { font-size: 13px; color: #94a3b8; }
+  #roomStatus b { color: #4ade80; }
+
+  main { flex: 1; display: flex; flex-wrap: wrap; padding: 12px; gap: 12px; }
+
+  .left { flex: 1 1 320px; min-width: 280px; display: flex; flex-direction: column; gap: 12px; }
+  .right { flex: 1 1 380px; min-width: 300px; display: flex; flex-direction: column; gap: 12px; }
+
+  .panel {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .panel h2 { font-size: 14px; margin-bottom: 10px; color: #93c5fd; }
+
+  .controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .controls button {
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    background: #334155;
+    color: #e2e8f0;
+    transition: all .15s;
+  }
+  .controls button:hover { background: #475569; }
+  .controls button.off { background: #dc2626; }
+  .controls button.raise { background: #fbbf24; color: #000; font-weight: 700; }
+
+  #notes {
+    width: 100%;
+    height: 140px;
+    background: #0f172a;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 14px;
+    resize: vertical;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  .chat-log {
+    height: 220px;
+    overflow-y: auto;
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .chat-log .msg { background: #1e293b; padding: 6px 10px; border-radius: 8px; }
+  .chat-log .msg b { color: #93c5fd; }
+  .chat-log .sys { color: #64748b; font-size: 12px; text-align: center; }
+  .chat-input { display: flex; gap: 8px; margin-top: 8px; }
+  .chat-input input {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 14px;
+  }
+  .chat-input button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    background: #4ade80;
+    color: #000;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .members { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+  .member {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #0f172a;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .member .dot { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; }
+  .member.muted .dot { background: #dc2626; }
+  .member.raised { border: 1px solid #fbbf24; }
+  .member .muted-icon, .member .hand-icon { font-size: 13px; margin-left: auto; }
+
+  .join-screen {
+    position: fixed; inset: 0;
+    background: #0f172a;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+  }
+  .join-box {
+    background: #1e293b; padding: 30px; border-radius: 14px;
+    width: 90%; max-width: 380px; text-align: center;
+  }
+  .join-box h2 { margin-bottom: 8px; }
+  .join-box p { font-size: 13px; color: #94a3b8; margin-bottom: 16px; }
+  .join-box input {
+    width: 100%; padding: 12px; margin-bottom: 10px;
+    border-radius: 8px; border: 1px solid #334155;
+    background: #0f172a; color: #e2e8f0; font-size: 15px;
+  }
+  .join-box button {
+    width: 100%; padding: 13px; border: none; border-radius: 8px;
+    background: #4ade80; color: #000; font-size: 16px; font-weight: 700; cursor: pointer;
+  }
+  .join-box .hint { margin-top: 12px; font-size: 12px; color: #64748b; }
+  .schedule-box {
+    background: #0f172a; border-radius: 8px; padding: 10px; margin-bottom: 10px; text-align: left;
+  }
+  .schedule-box h3 { font-size: 13px; color: #93c5fd; margin-bottom: 8px; text-align: center; }
+  .schedule-box input {
+    width: 48%; display: inline-block; padding: 9px; margin-bottom: 8px;
+    border-radius: 8px; border: 1px solid #334155;
+    background: #1e293b; color: #e2e8f0; font-size: 13px;
+  }
+  .schedule-box .sched-btn {
+    width: 100%; background: #fbbf24; color: #000; padding: 11px;
+  }
+  #schedLink {
+    margin-top: 8px; padding: 9px; background: #1e293b; border-radius: 8px;
+    font-size: 12px; color: #94a3b8; word-break: break-all; display: none;
+  }
+
+  #toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #334155; color: #e2e8f0; padding: 10px 18px; border-radius: 8px;
+    font-size: 14px; display: none; z-index: 60; max-width: 90%;
+  }
+</style>
+</head>
+<body>
+
+<div class="join-screen" id="joinScreen">
+  <div class="join-box">
+    <h2>🐆 Leopards MUX Zone Room</h2>
+    <p>50 log tak. Name + Room ID se join karein.</p>
+    <input id="joinName" type="text" placeholder="Your name" maxlength="30" onkeydown="if(event.key==='Enter')startMeeting()">
+    <input id="joinRoom" type="text" placeholder="Room ID (e.g. logistics-1)" maxlength="40">
+    <div class="schedule-box">
+      <h3>📅 Meeting Schedule</h3>
+      <input id="schedDate" type="date">
+      <input id="schedTime" type="time">
+      <button class="sched-btn" onclick="scheduleMeeting()">📅 Schedule & Share</button>
+      <div id="schedLink"></div>
+    </div>
+    <button onclick="startMeeting()">Join Meeting</button>
+    <p class="hint">Same Room ID par sab join karein. Mic permission allow karein.</p>
+  </div>
+</div>
+
+<header>
+  <h1>🐆 Leopards MUX Zone Room</h1>
+  <div id="roomStatus">Joining...</div>
+</header>
+
+<main>
+  <div class="left">
+    <div class="panel">
+      <h2>🎛 Controls</h2>
+      <div class="controls">
+        <button id="btnMic" onclick="toggleMic()">🎤 Mic: ON</button>
+        <button id="btnHand" class="raise" onclick="toggleHand()">🙋 Raise Hand</button>
+        <button id="btnScreen" onclick="toggleScreen()">🖥 Screen Share</button>
+        <button onclick="copyLink()">🔗 Copy Room Link</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>👥 Members (<span id="memberCount">1</span>)</h2>
+      <div class="members" id="members"></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="panel">
+      <h2>📝 Shared Notes</h2>
+      <textarea id="notes" placeholder="Type notes here..."></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>💬 Chat</h2>
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-input">
+        <input id="chatMsg" type="text" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+  let peer = null;
+  let roomId = '';
+  let myName = '';
+  let myStream = null;
+  let myAudioTrack = null;
+  let screenStream = null;
+  let isMicOn = true;
+  let isScreenOn = false;
+  let handRaised = false;
+
+  const connections = {};       // peerId -> data connection
+  const audioEls = {};          // peerId -> audio element
+  const memberMeta = {};        // peerId -> {name, muted, hand}
+
+  function $(id) { return document.getElementById(id); }
+  function toast(msg) {
+    $('toast').textContent = msg;
+    $('toast').style.display = 'block';
+    setTimeout(() => $('toast').style.display = 'none', 3000);
+  }
+  function addChat(name, text, sys) {
+    const log = $('chatLog');
+    const div = document.createElement('div');
+    if (sys) { div.className = 'sys'; div.textContent = text; }
+    else { div.className = 'msg'; div.innerHTML = `<b>${escapeHtml(name)}:</b> ${escapeHtml(text)}`; }
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function scheduleMeeting() {
+    const room = $('joinRoom').value.trim();
+    const date = $('schedDate').value;
+    const time = $('schedTime').value;
+    if (!room || !date || !time) { alert('Room ID, date aur time zaroori hai.'); return; }
+    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
+    const linkBox = $('schedLink');
+    linkBox.style.display = 'block';
+    linkBox.textContent = '📅 ' + date + ' ' + time + ' — ' + url;
+    navigator.clipboard.writeText(url + '\n📅 Meeting: ' + date + ' ' + time + ' (Leopards MUX Zone Room)')
+      .then(() => { toast('Link + schedule copied!'); })
+      .catch(() => { toast('Copy failed — link neeche dikha hai'); });
+  }
+
+  async function startMeeting() {
+    const name = $('joinName').value.trim();
+    const room = $('joinRoom').value.trim();
+    if (!name || !room) { alert('Name aur Room ID zaroori hai.'); return; }
+    myName = name; roomId = room;
+
+    try {
+      myStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      myAudioTrack = myStream.getAudioTracks()[0] || null;
+    } catch (e) {
+      myStream = null; myAudioTrack = null;
+      toast('Mic nahi mili — text mode mein join ho gaye');
+    }
+    $('joinScreen').style.display = 'none';
+    setupPeer();
+  }
+
+  function setupPeer() {
+    peer = new Peer(roomId);
+    peer.on('open', () => {
+      $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b>`;
+      renderMembers();
+      addChat('', `You joined the room (${roomId})`, true);
+    });
+    peer.on('error', (err) => {
+      if (err.type === 'unavailable-id') {
+        const unique = roomId + '-' + Date.now().toString(36);
+        peer = new Peer(unique);
+        peer.on('open', () => {
+          $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b>`;
+          renderMembers();
+          addChat('', `Joined room (${roomId})`, true);
+          const conn = peer.connect(roomId);
+          conn.on('open', () => onConnected(conn));
+          conn.on('data', (d) => handleData(d, conn));
+        });
+        peer.on('connection', (conn) => {
+          conn.on('open', () => onConnected(conn));
+          conn.on('data', (d) => handleData(d, conn));
+        });
+        peer.on('error', (e) => { if (e.type !== 'peer-unavailable') console.warn(e); });
+      } else if (err.type === 'peer-unavailable') {
+        toast('Room host offline ho gaye.');
+      } else if (err.type !== 'browser-incompatible') {
+        console.warn(err);
+      }
+    });
+
+    peer.on('connection', (conn) => {
+      conn.on('open', () => onConnected(conn));
+      conn.on('data', (d) => handleData(d, conn));
+    });
+    peer.on('call', (call) => {
+      call.answer(myStream || undefined);
+      call.on('stream', (s) => {
+        attachAudio(call.peer, s);
+      });
+      call.on('close', () => detachAudio(call.peer));
+    });
+  }
+
+  function onConnected(conn) {
+    connections[conn.peer] = conn;
+    conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+    if (myStream) {
+      const call = peer.call(conn.peer, myStream);
+      call.on('stream', (s) => attachAudio(conn.peer, s));
+      call.on('close', () => detachAudio(conn.peer));
+    }
+    addChat('', `${memberMeta[conn.peer] ? memberMeta[conn.peer].name : 'Someone'} joined`, true);
+    renderMembers();
+  }
+
+  function attachAudio(id, stream) {
+    let el = audioEls[id];
+    if (!el) {
+      el = document.createElement('audio');
+      el.autoplay = true;
+      audioEls[id] = el;
+      document.body.appendChild(el);
+    }
+    el.srcObject = stream;
+  }
+  function detachAudio(id) {
+    const el = audioEls[id];
+    if (el) { el.srcObject = null; el.remove(); }
+    delete audioEls[id];
+    renderMembers();
+  }
+
+  function handleData(d, conn) {
+    const id = conn.peer;
+    if (d.type === 'hello') {
+      memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand };
+      addChat('', `${d.name} joined`, true);
+      renderMembers();
+    } else if (d.type === 'state') {
+      if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false };
+      memberMeta[id].muted = d.muted;
+      memberMeta[id].hand = d.hand;
+      renderMembers();
+    } else if (d.type === 'chat') {
+      const meta = memberMeta[id] || { name: 'Member' };
+      addChat(meta.name, d.text);
+    } else if (d.type === 'notes') {
+      $('notes').value = d.text;
+    }
+  }
+
+  function broadcast(data) {
+    Object.values(connections).forEach(c => {
+      try { c.send(data); } catch (e) {}
+    });
+  }
+
+  function renderMembers() {
+    const box = $('members');
+    box.innerHTML = '';
+    let count = 1;
+    const me = document.createElement('div');
+    me.className = 'member' + (!isMicOn ? ' muted' : '') + (handRaised ? ' raised' : '');
+    me.innerHTML = `<span class="dot"></span><span>${escapeHtml(myName)} (You)</span>` +
+      (!isMicOn ? '<span class="muted-icon">🔇</span>' : '') +
+      (handRaised ? '<span class="hand-icon">🙋</span>' : '');
+    box.appendChild(me);
+    Object.keys(memberMeta).forEach(id => {
+      const m = memberMeta[id];
+      count++;
+      const el = document.createElement('div');
+      el.className = 'member' + (m.muted ? ' muted' : '') + (m.hand ? ' raised' : '');
+      el.innerHTML = `<span class="dot"></span><span>${escapeHtml(m.name)}</span>` +
+        (m.muted ? '<span class="muted-icon">🔇</span>' : '') +
+        (m.hand ? '<span class="hand-icon">🙋</span>' : '');
+      box.appendChild(el);
+    });
+    $('memberCount').textContent = count;
+  }
+
+  // ---- Controls ----
+  function toggleMic() {
+    if (!myAudioTrack) { toast('Mic available nahi'); return; }
+    isMicOn = !isMicOn;
+    myAudioTrack.enabled = isMicOn;
+    $('btnMic').textContent = isMicOn ? '🎤 Mic: ON' : '🔇 Mic: OFF';
+    $('btnMic').className = isMicOn ? '' : 'off';
+    broadcast({ type: 'state', muted: !isMicOn, hand: handRaised });
+    renderMembers();
+  }
+
+  function toggleHand() {
+    handRaised = !handRaised;
+    $('btnHand').textContent = handRaised ? '🙋 Hand: RAISED' : '🙋 Raise Hand';
+    broadcast({ type: 'state', muted: !isMicOn, hand: handRaised });
+    renderMembers();
+    toast(handRaised ? 'Hand raised!' : 'Hand lowered');
+  }
+
+  async function toggleScreen() {
+    if (isScreenOn) { stopScreen(); return; }
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      isScreenOn = true;
+      $('btnScreen').textContent = '🖥 Stop Share';
+      $('btnScreen').className = 'off';
+      toast('Screen sharing ON');
+      replaceAudioWithVideo();
+      screenStream.getVideoTracks()[0].onended = () => stopScreen();
+    } catch (e) {
+      toast('Screen share cancel ho gaya');
+    }
+  }
+
+  function stopScreen() {
+    if (screenStream) {
+      screenStream.getTracks().forEach(t => t.stop());
+      screenStream = null;
+    }
+    isScreenOn = false;
+    $('btnScreen').textContent = '🖥 Screen Share';
+    $('btnScreen').className = '';
+    if (myStream) replaceAudioWithVideo();
+    toast('Screen sharing OFF');
+  }
+
+  function replaceAudioWithVideo() {
+    Object.values(connections).forEach((conn) => {
+      try {
+        const sender = conn.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) sender.replaceTrack(isScreenOn && screenStream ? screenStream.getVideoTracks()[0] : null);
+      } catch (e) {}
+    });
+  }
+
+  function copyLink() {
+    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(roomId);
+    navigator.clipboard.writeText(url).then(() => toast('Room link copied!')).catch(() => toast(url));
+  }
+
+  // auto-join from URL hash
+  window.addEventListener('load', () => {
+    const hash = location.hash;
+    if (hash.startsWith('#room=')) {
+      const room = decodeURIComponent(hash.slice(6));
+      $('joinRoom').value = room;
+      $('joinRoom').style.display = 'none';
+      $('schedDate').parentElement.style.display = 'none';
+      $('joinName').placeholder = 'Sirf apna name likhein...';
+      $('joinName').focus();
+      $('joinName').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') startMeeting();
+      });
+    }
+  });
+
+  // ---- Notes ----
+  let notesTimer = null;
+  $('notes').addEventListener('input', (e) => {
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(() => broadcast({ type: 'notes', text: e.target.value }), 600);
+  });
+
+  // ---- Chat ----
+  function sendChat() {
+    const msg = $('chatMsg').value.trim();
+    if (!msg) return;
+    broadcast({ type: 'chat', text: msg });
+    addChat(myName, msg);
+    $('chatMsg').value = '';
+  }
+</script>
+</body>
+</html>
