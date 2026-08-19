@@ -229,8 +229,16 @@
     </div>
 
     <div class="panel">
-      <h2>📝 Shared Notes</h2>
+      <h2>📝 Shared Notes <span style="color:#4ade80;font-size:11px;" id="notesSaved"></span></h2>
       <textarea id="notes" placeholder="Type notes here..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="sched-btn" style="background:#4ade80;color:#000;border:none;border-radius:8px;padding:10px;cursor:pointer;flex:1;" onclick="generateSummary()">🤖 Auto Summary</button>
+        <button class="sched-btn" style="background:#fbbf24;color:#000;border:none;border-radius:8px;padding:10px;cursor:pointer;flex:1;" onclick="exportNotes()">⬇️ Export Notes</button>
+      </div>
+      <div id="summaryBox" style="margin-top:8px;display:none;">
+        <div style="font-size:13px;color:#93c5fd;margin-bottom:6px;">📊 Summary:</div>
+        <div id="summaryText" style="background:#0f172a;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap;"></div>
+      </div>
     </div>
 
     <div class="panel">
@@ -352,6 +360,7 @@
       localStorage.setItem('lmz-owner-' + roomId, hostKey);
       updateRoomStatus();
       renderMembers();
+      loadNotes();
       addChat('', `You created the room (${roomId}) — Aap admin hain 👑`, true);
       startHeartbeat();
     });
@@ -379,6 +388,7 @@
       oldPeer.destroy();
       updateRoomStatus();
       addChat('', `Joined room (${roomId})`, true);
+      loadNotes();
       const conn = peer.connect(roomId); // host se connect
       conn.on('open', () => {
         onConnected(conn);
@@ -755,8 +765,72 @@
   let notesTimer = null;
   $('notes').addEventListener('input', (e) => {
     clearTimeout(notesTimer);
-    notesTimer = setTimeout(() => broadcast({ type: 'notes', text: e.target.value }), 600);
+    notesTimer = setTimeout(() => {
+      broadcast({ type: 'notes', text: e.target.value });
+      autosaveNotes();
+    }, 600);
   });
+
+  function autosaveNotes() {
+    if (!roomId) return;
+    try {
+      localStorage.setItem('lmz-notes-' + roomId, $('notes').value);
+      const saved = $('notesSaved');
+      saved.textContent = '💾 saved';
+      setTimeout(() => { saved.textContent = ''; }, 1500);
+    } catch(e) {}
+  }
+
+  function loadNotes() {
+    if (!roomId) return;
+    try {
+      const saved = localStorage.getItem('lmz-notes-' + roomId);
+      if (saved && !$('notes').value) $('notes').value = saved;
+    } catch(e) {}
+  }
+
+  function generateSummary() {
+    const text = $('notes').value.trim();
+    if (!text) { toast('Pehle notes likhein'); return; }
+
+    const lines = text.split(/\n+/).map(l => l.trim()).filter(l => l.length > 2);
+    const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+    const stopWords = ['the','and','that','this','with','from','have','will','into','about','your','our','their','then','them','for','are','was','were','been','not','but','what','when','which','they','you','sir','karo','kya','hai','hain','aur','lekin','tum','aap','mein','ka','ki','ke','se','ko','par','ho','hoga','tha','the','bhi','nahi','yah'];
+    const freq = {};
+    words.forEach(w => { if (!stopWords.includes(w)) freq[w] = (freq[w] || 0) + 1; });
+    const topWords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0,10);
+
+    // bullet points: har line ka pehla 12 words
+    const bullets = lines.slice(0, 12).map(l => {
+      const parts = l.split(/[:\-–]/);
+      return '• ' + (parts[0].length > 90 ? parts[0].slice(0, 90) + '...' : parts[0]);
+    });
+
+    const date = new Date().toLocaleString();
+    let summary = '';
+    summary += '📋 Meeting Summary — ' + date + '\n';
+    summary += '─────────────────\n';
+    summary += '📌 Main Points:\n' + bullets.join('\n') + '\n\n';
+    if (topWords.length) summary += '🔑 Key Topics: ' + topWords.map(([w,n]) => w + (n>1 ? '(' + n + ')' : '')).join(', ') + '\n';
+    summary += '\n✅ Total notes lines: ' + lines.length;
+
+    $('summaryText').textContent = summary;
+    $('summaryBox').style.display = 'block';
+    toast('Summary ready!');
+  }
+
+  function exportNotes() {
+    const text = $('notes').value.trim();
+    if (!text) { toast('Kuch nahi hai export karne ke liye'); return; }
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leopards-notes-' + roomId + '.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Notes downloaded!');
+  }
 
   // ---- Chat ----
   function sendChat() {
