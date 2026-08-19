@@ -225,6 +225,7 @@
         <button id="btnCam" onclick="toggleCam()">📷 Cam: ON</button>
         <button id="btnHand" class="raise" onclick="toggleHand()">🙋 Raise Hand</button>
         <button id="btnScreen" onclick="toggleScreen()">🖥 Screen Share</button>
+        <button id="btnEnd" onclick="endMeeting()" style="background:#dc2626;color:#fff;font-weight:700;">⏹ End Meeting</button>
       </div>
     </div>
 
@@ -605,6 +606,10 @@
     } else if (d.type === 'screen-stop') {
       receivingScreen[id] = false;
       detachScreenTile(id);
+    } else if (d.type === 'meeting-end') {
+      // host ne meeting khatam kardi
+      toast('👋 Host ne meeting end kar di');
+      setTimeout(() => { location.hash = ''; location.reload(); }, 2000);
     } else if (d.type === 'chat') {
       const meta = memberMeta[id] || { name: 'Member' };
       addChat(meta.name, d.text);
@@ -877,6 +882,26 @@
     screenWin = null;
     detachScreenTile('mine');
     toast('Screen sharing OFF');
+  }
+
+  // meeting khatam karo — sab ko batao aur yeh page se bahar nikal jao
+  function endMeeting() {
+    if (!confirm('Meeting end karni hai? Sab participants disconnect ho jayenge.')) return;
+    // sabko end ka message bhejo
+    broadcast({ type: 'meeting-end' });
+    // screen share band karo
+    if (isScreenOn) stopScreen();
+    // sab streams band karo
+    if (myStream) { myStream.getTracks().forEach(t => t.stop()); myStream = null; }
+    if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+    // sab connections band karo
+    Object.values(connections).forEach(c => { try { c.close(); } catch(e) {} });
+    Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
+    if (peer) { try { peer.destroy(); } catch(e) {} }
+    clearInterval(heartbeatTimer);
+    // join screen wapas dikhao
+    location.hash = '';
+    location.reload();
   }
 
   function copyLink() {
