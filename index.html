@@ -218,6 +218,7 @@
     <button id="newRoomBtn" onclick="makeNewRoom()" style="display:none;background:#4ade80;color:#000;font-weight:700;">🆕 Nayi Meeting Banao (New Link)</button>
     <button onclick="startMeeting()">Join Meeting</button>
     <p class="hint">Same Room ID par sab join karein. Mic permission allow karein.</p>
+    <p id="joinHint2" class="hint" style="display:none;color:#4ade80;">✅ Room link detected — sirf naam likhein aur Join dabayen</p>
   </div>
 </div>
 
@@ -338,12 +339,17 @@
     $('joinRoom').value = room;
     return location.href.split('#')[0] + '#room=' + encodeURIComponent(room) + '&host=' + hostKey;
   }
+  // members ka plain link — kholte hi auto-join (naam likhne ki zaroorat nahi)
+  function buildJoinUrl() {
+    const room = $('joinRoom').value.trim() || roomId;
+    return location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
+  }
 
   function scheduleMeeting() {
     const date = $('schedDate').value;
     const time = $('schedTime').value;
     if (!date || !time) { alert('Date aur time zaroori hai.'); return; }
-    const url = buildUrl();
+    const url = buildJoinUrl();
     const linkBox = $('schedLink');
     linkBox.style.display = 'block';
     linkBox.textContent = '📅 ' + date + ' ' + time + ' — ' + url;
@@ -353,8 +359,8 @@
   }
 
   function copyRoomLink() {
-    const url = buildUrl();
-    navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — open karein aur apna naam likh kar join karein')
+    const url = buildJoinUrl();
+    navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — link kholo aur apna naam likh kar join karo')
       .then(() => toast('Room link copied! ' + url))
       .catch(() => toast(url));
   }
@@ -1049,6 +1055,7 @@
       $('joinRoom').style.display = 'none';
       $('schedDate').parentElement.style.display = 'none';
       $('joinName').placeholder = 'Sirf apna name likhein...';
+      $('joinHint2').style.display = 'block';
       $('joinName').focus();
       $('joinName').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') startMeeting();
