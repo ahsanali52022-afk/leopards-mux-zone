@@ -124,12 +124,18 @@
 
   .screen-area { display: none; flex-direction: column; gap: 8px; }
   .screen-area.active { display: flex; }
-  .screen-tile { position: relative; background: #0f172a; border-radius: 10px; overflow: hidden; border: 2px solid #4ade80; }
-  .screen-tile video { width: 100%; max-height: 300px; object-fit: contain; display: block; background: #000; }
+  .screen-tile { position: relative; background: #0f172a; border-radius: 10px; overflow: hidden; border: 2px solid #4ade80; margin-bottom: 8px; }
+  .screen-tile video { width: 100%; max-height: 320px; object-fit: contain; display: block; background: #000; cursor: pointer; }
   .screen-tile .label {
     position: absolute; bottom: 4px; left: 6px;
     background: rgba(0,0,0,0.7); padding: 2px 10px; border-radius: 6px; font-size: 12px;
   }
+  .screen-tile .fs-btn {
+    position: absolute; top: 6px; right: 6px;
+    background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #4ade80;
+    border-radius: 6px; padding: 4px 10px; font-size: 14px; cursor: pointer; z-index: 5;
+  }
+  .screen-tile .fs-btn:hover { background: #4ade80; color: #000; }
 
   #videoTiles { display: flex; flex-wrap: wrap; gap: 8px; max-height: 320px; overflow-y: auto; }
   .video-tile { position: relative; width: 160px; height: 110px; background: #0f172a; border-radius: 10px; overflow: hidden; border: 2px solid #334155; }
@@ -695,17 +701,30 @@
     video.autoplay = true;
     video.playsInline = true;
     video.srcObject = stream;
+    video.addEventListener('dblclick', () => fullscreenVideo(video));
     const label = document.createElement('div');
     label.className = 'label';
     label.textContent = '🖥 ' + (memberMeta[id] ? memberMeta[id].name : 'Screen');
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'fs-btn';
+    fsBtn.textContent = '⛶ Fullscreen';
+    fsBtn.onclick = () => fullscreenVideo(video);
     tile.appendChild(video);
     tile.appendChild(label);
+    tile.appendChild(fsBtn);
     $('screenTiles').appendChild(tile);
   }
   function detachScreenTile(id) {
     const el = document.getElementById('screen-' + id);
     if (el) el.remove();
     if ($('screenTiles').children.length === 0) $('screenArea').classList.remove('active');
+  }
+
+  function fullscreenVideo(video) {
+    if (video.requestFullscreen) video.requestFullscreen();
+    else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+    else if (video.mozRequestFullScreen) video.mozRequestFullScreen();
+    else if (video.msRequestFullscreen) video.msRequestFullscreen();
   }
 
   // ---- UI ----
@@ -822,10 +841,11 @@
 
   // screen share alag window mein (Zoom ki tarah)
   let screenWin = null;
+  let screenWinCheckTimer = null;
   function openScreenWindow() {
-    if (screenWin && !screenWin.closed) { screenWin.close(); }
+    if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
     screenWin = window.open('', 'lmzScreen', 'width=900,height=600,resizable=yes');
-    if (!screenWin) { toast('Popup block — screen yahan dikhegi'); addLocalScreenTile(); return; }
+    if (!screenWin) { toast('Popup block — screen yahan dikhegi'); addLocalScreenTile(); startScreenWinCheck(); return; }
     const html = `<html><head><title>🖥 Screen Share — ${escapeHtml(myName)}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -837,15 +857,30 @@
       button:hover { background:#ef4444; }
     </style></head>
     <body>
-      <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen(); window.close();">⏹ Stop Sharing</button></div>
+      <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen();">⏹ Stop Sharing</button></div>
       <video autoplay muted playsinline></video>
       <script>
         const v = document.querySelector('video');
         v.srcObject = window.opener.screenStream;
+        // window close hone par sharing stop
+        window.addEventListener('beforeunload', function(){ try { window.opener.stopScreen(); } catch(e){} });
       <\/script>
     </body></html>`;
     screenWin.document.write(html);
     screenWin.document.close();
+    startScreenWinCheck();
+  }
+
+  // screen window close ho gayi to sharing stop
+  function startScreenWinCheck() {
+    clearInterval(screenWinCheckTimer);
+    screenWinCheckTimer = setInterval(() => {
+      if (!isScreenOn) { clearInterval(screenWinCheckTimer); return; }
+      if (screenWin && screenWin.closed) {
+        clearInterval(screenWinCheckTimer);
+        stopScreen();
+      }
+    }, 1000);
   }
 
   function addLocalScreenTile() {
@@ -862,8 +897,13 @@
     const label = document.createElement('div');
     label.className = 'label';
     label.textContent = '🖥 ' + myName + ' (You)';
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'fs-btn';
+    fsBtn.textContent = '⛶';
+    fsBtn.onclick = () => fullscreenVideo(video);
     tile.appendChild(video);
     tile.appendChild(label);
+    tile.appendChild(fsBtn);
     $('screenTiles').appendChild(tile);
   }
 
@@ -877,6 +917,7 @@
       screenStream = null;
     }
     isScreenOn = false;
+    clearInterval(screenWinCheckTimer);
     $('btnScreen').textContent = '🖥 Screen Share';
     $('btnScreen').className = '';
     if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
