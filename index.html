@@ -316,6 +316,7 @@
   const connections = {};       // peerId -> data connection
   const audioEls = {};          // peerId -> audio element
   const screenCalls = {};       // peerId -> screen call (sharer side)
+  const audioCalls = {};        // peerId -> outgoing media call (mic switch ke liye)
   const memberMeta = {};        // peerId -> {name, muted, hand}
   const receivingScreen = {};   // peerId -> bool
   const videoStreams = {};      // peerId -> video stream
@@ -602,8 +603,10 @@
     conn.send({ type: 'hello', name: myName, muted: !isMicOn, camOn: isCamOn, hand: handRaised, isAdmin, hostKey: isAdmin ? hostKey : '' });
     if (myStream) {
       const call = peer.call(conn.peer, myStream);
+      audioCalls[conn.peer] = call;
       call.on('stream', (s) => attachAudio(conn.peer, s));
       call.on('close', () => {
+        delete audioCalls[conn.peer];
         detachAudio(conn.peer);
         removeVideoTile(conn.peer);
       });
@@ -967,7 +970,7 @@
     } catch(e) { try { $('micSelect').style.display = 'none'; } catch(e2) {} }
   }
 
-  // selected mic par switch — peer connections dobara audio stream karenge
+  // selected mic par switch — peer calls par replaceTrack karo taake handsfree/speaker mic live chalay
   async function switchMic(deviceId) {
     if (!deviceId) return;
     try {
@@ -981,6 +984,13 @@
         myStream.removeTrack(myStream.getAudioTracks()[0]);
         myStream.addTrack(newTrack);
       }
+      // sab chale hue calls par naya track replace karo (WebRTC replaceTrack)
+      Object.values(audioCalls).forEach(call => {
+        try {
+          const sender = call.peerConnection && call.peerConnection.getSenders && call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'audio');
+          if (sender && sender.replaceTrack) sender.replaceTrack(newTrack);
+        } catch(e) {}
+      });
       isMicOn = true;
       $('btnMic').textContent = '🎤 Mic: ON';
       $('btnMic').className = '';
