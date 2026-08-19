@@ -525,6 +525,21 @@
   function setupConn(conn) {
     conn.on('open', () => onConnected(conn));
     conn.on('data', (d) => handleData(d, conn));
+    conn.on('close', () => {
+      const id = conn.peer;
+      if (memberMeta[id]) {
+        addChat('', `${memberMeta[id].name} left the meeting`, true);
+      }
+      delete memberMeta[id];
+      delete connections[id];
+      detachAudio(id);
+      removeVideoTile(id);
+      detachScreenTile(id);
+      delete receivingScreen[id];
+      renderMembers();
+      broadcast({ type: 'member-left', id });
+    });
+    conn.on('error', () => {});
   }
 
   function onConnected(conn) {
@@ -574,6 +589,11 @@
       memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand, adminMuted: false };
       if (d.isAdmin && d.hostKey) originalHostName = d.name;
       addChat('', `${d.name} joined`, true);
+      renderMembers();
+      // sabko naye member ki info do
+      broadcast({ type: 'member-joined', id, name: d.name, muted: d.muted });
+    } else if (d.type === 'member-joined') {
+      memberMeta[d.id] = { name: d.name, muted: d.muted, hand: false, adminMuted: false };
       renderMembers();
     } else if (d.type === 'state') {
       if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
@@ -868,8 +888,11 @@
   let screenWinCheckTimer = null;
   function openScreenWindow() {
     if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
-    screenWin = window.open('', 'lmzScreen', 'width=900,height=600,resizable=yes');
-    if (!screenWin) return; // popup block — addLocalScreenTile() baad mein call hoga
+    screenWin = null;
+    try {
+      screenWin = window.open('', 'lmzScreen', 'width=900,height=600,resizable=yes');
+    } catch(e) { screenWin = null; }
+    if (!screenWin || screenWin.closed) { screenWin = null; return; } // popup block — addLocalScreenTile() baad mein call hoga
     const html = `<html><head><title>🖥 Screen Share — ${escapeHtml(myName)}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -888,9 +911,13 @@
         window.addEventListener('beforeunload', function(){ try { window.opener.stopScreen(); } catch(e){} });
       <\/script>
     </body></html>`;
-    screenWin.document.write(html);
-    screenWin.document.close();
-    startScreenWinCheck();
+    try {
+      screenWin.document.write(html);
+      screenWin.document.close();
+    } catch(e) {
+      screenWin = null;
+    }
+    if (screenWin) startScreenWinCheck();
   }
 
   // screen window close ho gayi to sharing stop
