@@ -263,13 +263,20 @@
   const audioEls = {};          // peerId -> audio element
   const screenCalls = {};       // peerId -> screen call (sharer side)
   const memberMeta = {};        // peerId -> {name, muted, hand}
-  let isAdmin = false;          // room host (link share karne wala)
+  const receivingScreen = {};   // peerId -> bool
+
+  let isAdmin = false;          // room host (admin)
+  let originalHostName = '';    // pehle host ka naam (wapis aye to host wapas mile)
+  let lastHeartbeat = 0;        // host ka aakhri heartbeat time
+  let heartbeatTimer = null;    // heartbeat check timer
+  let hostKey = '';             // original host ka secret key (URL me hota hai)
+  let amOriginalHost = false;   // kya main original host hoon
 
   function $(id) { return document.getElementById(id); }
   function toast(msg) {
     $('toast').textContent = msg;
     $('toast').style.display = 'block';
-    setTimeout(() => $('toast').style.display = 'none', 3000);
+    setTimeout(() => $('toast').style.display = 'none', 4000);
   }
   function addChat(name, text, sys) {
     const log = $('chatLog');
@@ -282,14 +289,22 @@
   function escapeHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
+  function genKey() {
+    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
 
-  function scheduleMeeting() {
+  // ----- link/share -----
+  function buildUrl() {
     const room = $('joinRoom').value.trim() || 'leopards-zone';
     $('joinRoom').value = room;
+    return location.href.split('#')[0] + '#room=' + encodeURIComponent(room) + '&host=' + hostKey;
+  }
+
+  function scheduleMeeting() {
     const date = $('schedDate').value;
     const time = $('schedTime').value;
     if (!date || !time) { alert('Date aur time zaroori hai.'); return; }
-    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
+    const url = buildUrl();
     const linkBox = $('schedLink');
     linkBox.style.display = 'block';
     linkBox.textContent = '📅 ' + date + ' ' + time + ' — ' + url;
@@ -299,9 +314,7 @@
   }
 
   function copyRoomLink() {
-    const room = $('joinRoom').value.trim() || 'leopards-zone';
-    $('joinRoom').value = room;
-    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
+    const url = buildUrl();
     navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — open karein aur apna naam likh kar join karein')
       .then(() => toast('Room link copied! ' + url))
       .catch(() => toast(url));
@@ -327,73 +340,225 @@
     setupPeer();
   }
 
+  // ----- peer connection setup -----
   function setupPeer() {
     peer = new Peer(roomId);
     peer.on('open', () => {
-      isAdmin = true; // room host = admin (link share karne wala)
-      $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b> 👑 Admin`;
+      // room pehle se nahi tha — main original host hoon
+      isAdmin = true;
+      amOriginalHost = true;
+      originalHostName = myName;
+      if (!hostKey) hostKey = genKey();
+      localStorage.setItem('lmz-owner-' + roomId, hostKey);
+      updateRoomStatus();
       renderMembers();
-      addChat('', `You joined the room (${roomId}) — Aap admin hain`, true);
+      addChat('', `You created the room (${roomId}) — Aap admin hain 👑`, true);
+      startHeartbeat();
     });
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id') {
-        const unique = roomId + '-' + Date.now().toString(36);
-        peer = new Peer(unique);
-        peer.on('open', () => {
-          $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b>`;
-          renderMembers();
-          addChat('', `Joined room (${roomId})`, true);
-          const conn = peer.connect(roomId);
-          conn.on('open', () => onConnected(conn));
-          conn.on('data', (d) => handleData(d, conn));
-        });
-        peer.on('connection', (conn) => {
-          conn.on('open', () => onConnected(conn));
-          conn.on('data', (d) => handleData(d, conn));
-        });
-        peer.on('error', (e) => { if (e.type !== 'peer-unavailable') console.warn(e); });
-        peer.on('call', (call) => handleIncomingCall(call));
+        // room pehle se hai — member ban kar join karo
+        joinAsMember();
       } else if (err.type === 'peer-unavailable') {
-        toast('Room host offline ho gaye.');
+        toast('Room host offline ho gaye — naya host ban raha hai...');
+        tryBecomeHost();
       } else if (err.type !== 'browser-incompatible') {
         console.warn(err);
       }
     });
-
-    peer.on('connection', (conn) => {
-      conn.on('open', () => onConnected(conn));
-      conn.on('data', (d) => handleData(d, conn));
-    });
+    peer.on('connection', (conn) => setupConn(conn));
     peer.on('call', (call) => handleIncomingCall(call));
   }
 
-  function handleIncomingCall(call) {
-    call.answer(); // no stream — audio aur screen alag calls handle hote hain
-    call.on('stream', (s) => {
-      if (s.getVideoTracks().length > 0) {
-        attachScreenTile(call.peer, s);
+  // member ban kar join karo
+  function joinAsMember() {
+    const unique = roomId + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    const oldPeer = peer;
+    peer = new Peer(unique);
+    peer.on('open', () => {
+      oldPeer.destroy();
+      updateRoomStatus();
+      addChat('', `Joined room (${roomId})`, true);
+      const conn = peer.connect(roomId); // host se connect
+      conn.on('open', () => {
+        onConnected(conn);
+        conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+        if (amOriginalHost) conn.send({ type: 'request-host', hostKey, name: myName });
+      });
+      conn.on('data', (d) => handleData(d, conn));
+      conn.on('close', () => {
+        toast('Host se connection tut gaya — naya host dhoond raha hai...');
+        tryBecomeHost();
+      });
+      startHostWatch();
+    });
+    peer.on('connection', (conn) => setupConn(conn));
+    peer.on('error', (e) => { if (e.type !== 'peer-unavailable') console.warn(e); });
+    peer.on('call', (call) => handleIncomingCall(call));
+  }
+
+  // host gayab ho to naya host banne ki koshish
+  function tryBecomeHost() {
+    clearInterval(heartbeatTimer);
+    const oldPeer = peer;
+    const newPeer = new Peer(roomId);
+    newPeer.on('open', () => {
+      // main naya host ban gaya
+      oldPeer.destroy();
+      peer = newPeer;
+      isAdmin = true;
+      amOriginalHost = false;
+      updateRoomStatus();
+      renderMembers();
+      addChat('', 'Aap naye host ban gaye (admin) 👑', true);
+      startHeartbeat();
+    });
+    newPeer.on('error', (err) => {
+      if (err.type === 'unavailable-id') {
+        // koi aur naya host ban gaya — usse connect karo
+        const c = newPeer.connect(roomId);
+        c.on('open', () => {
+          onConnected(c);
+          c.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+          if (amOriginalHost) c.send({ type: 'request-host', hostKey, name: myName });
+        });
+        c.on('data', (d) => handleData(d, c));
+        c.on('close', () => tryBecomeHost());
+        startHostWatch();
       } else {
-        attachAudio(call.peer, s);
+        console.warn(err);
+        startHostWatch();
       }
     });
-    call.on('close', () => {
-      detachAudio(call.peer);
-      detachScreenTile(call.peer);
+    newPeer.on('connection', (conn) => setupConn(conn));
+    newPeer.on('call', (call) => handleIncomingCall(call));
+  }
+
+  // host ko heartbeat bhejna (sirf admin)
+  function startHeartbeat() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (!isAdmin) return;
+      broadcast({ type: 'heartbeat', hostKey, hostName: myName, hostId: peer.id });
+    }, 2000);
+  }
+
+  // member host ko watch karta hai (host zinda hai ya nahi)
+  function startHostWatch() {
+    lastHeartbeat = Date.now();
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (isAdmin) return;
+      if (Date.now() - lastHeartbeat > 8000) {
+        toast('Host disconnect ho gaya — naya host ban raha hai...');
+        tryBecomeHost();
+      }
+    }, 3000);
+  }
+
+  // original host wapas aa jaye to host wapas de do
+  function giveHostBack(conn) {
+    toast('Original host wapas aa gaya — host wapas de rahe hain');
+    isAdmin = false;
+    isAdminMuted = false;
+    clearInterval(heartbeatTimer);
+    const myUnique = roomId + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    const oldPeer = peer;
+    peer = new Peer(myUnique);
+    peer.on('open', () => {
+      oldPeer.destroy();
+      updateRoomStatus();
+      renderMembers();
+      const c = peer.connect(roomId); // original host se connect
+      c.on('open', () => {
+        onConnected(c);
+        c.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+      });
+      c.on('data', (d) => handleData(d, c));
+      startHostWatch();
     });
+    peer.on('connection', (conn) => setupConn(conn));
+    peer.on('call', (call) => handleIncomingCall(call));
+  }
+
+  function setupConn(conn) {
+    conn.on('open', () => onConnected(conn));
+    conn.on('data', (d) => handleData(d, conn));
   }
 
   function onConnected(conn) {
     connections[conn.peer] = conn;
-    conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised });
+    conn.send({ type: 'hello', name: myName, muted: !isMicOn, hand: handRaised, isAdmin, hostKey: isAdmin ? hostKey : '' });
     if (myStream) {
       const call = peer.call(conn.peer, myStream);
       call.on('stream', (s) => attachAudio(conn.peer, s));
       call.on('close', () => detachAudio(conn.peer));
     }
-    addChat('', `${memberMeta[conn.peer] ? memberMeta[conn.peer].name : 'Someone'} joined`, true);
     renderMembers();
   }
 
+  function handleIncomingCall(call) {
+    const isScreen = !!receivingScreen[call.peer];
+    if (isScreen) {
+      call.answer();
+      call.on('stream', (s) => { if (s.getVideoTracks().length > 0) attachScreenTile(call.peer, s); });
+    } else {
+      call.answer(myStream || undefined);
+      call.on('stream', (s) => {
+        if (s.getVideoTracks().length > 0) attachScreenTile(call.peer, s);
+        else attachAudio(call.peer, s);
+      });
+    }
+    call.on('close', () => { detachAudio(call.peer); detachScreenTile(call.peer); });
+  }
+
+  function handleData(d, conn) {
+    const id = conn.peer;
+    if (d.type === 'hello') {
+      memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand, adminMuted: false };
+      if (d.isAdmin && d.hostKey) originalHostName = d.name;
+      addChat('', `${d.name} joined`, true);
+      renderMembers();
+    } else if (d.type === 'state') {
+      if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
+      memberMeta[id].muted = d.muted;
+      memberMeta[id].hand = d.hand;
+      renderMembers();
+    } else if (d.type === 'admin-mute') {
+      if (d.muted) {
+        isAdminMuted = true;
+        if (isMicOn) toggleMic();
+        toast('👑 Admin ne aapka mic mute kar diya');
+      } else {
+        isAdminMuted = false;
+        toast('👑 Admin ne mic un-mute kar diya');
+      }
+    } else if (d.type === 'heartbeat') {
+      lastHeartbeat = Date.now();
+      if (isAdmin && d.hostKey && d.hostKey === hostKey && !amOriginalHost) {
+        // original host wapas aa gaya hai — host wapas do
+        const c = connections[id];
+        if (c) giveHostBack(c);
+      }
+    } else if (d.type === 'request-host') {
+      if (isAdmin && d.hostKey && d.hostKey === hostKey && d.name === originalHostName) {
+        giveHostBack(conn);
+      }
+    } else if (d.type === 'chat') {
+      const meta = memberMeta[id] || { name: 'Member' };
+      addChat(meta.name, d.text);
+    } else if (d.type === 'notes') {
+      $('notes').value = d.text;
+    }
+  }
+
+  function broadcast(data) {
+    Object.values(connections).forEach(c => {
+      try { c.send(data); } catch (e) {}
+    });
+  }
+
+  // ---- audio/video ----
   function attachAudio(id, stream) {
     let el = audioEls[id];
     if (!el) {
@@ -434,54 +599,9 @@
     if ($('screenTiles').children.length === 0) $('screenArea').classList.remove('active');
   }
 
-  function handleData(d, conn) {
-    const id = conn.peer;
-    if (d.type === 'hello') {
-      memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand, adminMuted: false };
-      addChat('', `${d.name} joined`, true);
-      renderMembers();
-    } else if (d.type === 'state') {
-      if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
-      memberMeta[id].muted = d.muted;
-      memberMeta[id].hand = d.hand;
-      renderMembers();
-    } else if (d.type === 'admin-mute') {
-      // admin ne mic off/on kiya
-      if (d.muted) {
-        isAdminMuted = true;
-        if (isMicOn) toggleMic();
-        toast('👑 Admin ne aapka mic mute kar diya');
-      } else {
-        isAdminMuted = false;
-        toast('👑 Admin ne mic un-mute kar diya');
-      }
-    } else if (d.type === 'chat') {
-      const meta = memberMeta[id] || { name: 'Member' };
-      addChat(meta.name, d.text);
-    } else if (d.type === 'notes') {
-      $('notes').value = d.text;
-    }
-  }
-
-  function adminToggleMic(peerId) {
-    if (!isAdmin) return;
-    const m = memberMeta[peerId];
-    if (!m) return;
-    const newMuted = !m.adminMuted;
-    m.adminMuted = newMuted;
-    m.muted = newMuted;
-    const conn = connections[peerId];
-    if (conn) {
-      try { conn.send({ type: 'admin-mute', muted: newMuted }); } catch(e) {}
-    }
-    renderMembers();
-    toast(newMuted ? 'Member ka mic mute kar diya' : 'Member ka mic on kar diya');
-  }
-
-  function broadcast(data) {
-    Object.values(connections).forEach(c => {
-      try { c.send(data); } catch (e) {}
-    });
+  // ---- UI ----
+  function updateRoomStatus() {
+    $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b> ${isAdmin ? '👑 Admin' : ''}`;
   }
 
   function renderMembers() {
@@ -511,6 +631,21 @@
     $('memberCount').textContent = count;
   }
 
+  function adminToggleMic(peerId) {
+    if (!isAdmin) return;
+    const m = memberMeta[peerId];
+    if (!m) return;
+    const newMuted = !m.adminMuted;
+    m.adminMuted = newMuted;
+    m.muted = newMuted;
+    const conn = connections[peerId];
+    if (conn) {
+      try { conn.send({ type: 'admin-mute', muted: newMuted }); } catch(e) {}
+    }
+    renderMembers();
+    toast(newMuted ? 'Member ka mic mute kar diya' : 'Member ka mic on kar diya');
+  }
+
   // ---- Controls ----
   function toggleMic() {
     if (!myAudioTrack) { toast('Mic available nahi'); return; }
@@ -534,13 +669,12 @@
   async function toggleScreen() {
     if (isScreenOn) { stopScreen(); return; }
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       isScreenOn = true;
       $('btnScreen').textContent = '🖥 Stop Share';
       $('btnScreen').className = 'off';
       toast('Screen sharing ON');
 
-      // local preview
       const area = $('screenArea');
       area.classList.add('active');
       const tile = document.createElement('div');
@@ -558,7 +692,6 @@
       tile.appendChild(label);
       $('screenTiles').appendChild(tile);
 
-      // send to all peers
       Object.keys(connections).forEach((pid) => {
         const call = peer.call(pid, screenStream);
         screenCalls[pid] = call;
@@ -587,7 +720,7 @@
   }
 
   function copyLink() {
-    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(roomId);
+    const url = buildUrl();
     navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — open karein aur apna naam likh kar join karein')
       .then(() => toast('Room link copied!'))
       .catch(() => toast(url));
@@ -596,8 +729,10 @@
   // auto-join from URL hash
   window.addEventListener('load', () => {
     const hash = location.hash;
-    if (hash.startsWith('#room=')) {
-      const room = decodeURIComponent(hash.slice(6));
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    const room = params.get('room') || '';
+    hostKey = params.get('host') || '';
+    if (room) {
       $('joinRoom').value = room;
       $('joinRoom').style.display = 'none';
       $('schedDate').parentElement.style.display = 'none';
@@ -606,8 +741,13 @@
       $('joinName').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') startMeeting();
       });
+      // original host tabhi hai jab is browser ne room banaya tha
+      const stored = localStorage.getItem('lmz-owner-' + room);
+      if (hostKey && stored === hostKey) amOriginalHost = true;
     } else {
       $('joinRoom').value = 'leopards-zone';
+      hostKey = genKey();
+      amOriginalHost = true;
     }
   });
 
