@@ -175,6 +175,7 @@
       <input id="schedDate" type="date">
       <input id="schedTime" type="time">
       <button class="sched-btn" onclick="scheduleMeeting()">📅 Schedule & Share</button>
+      <button class="sched-btn" style="background:#4ade80;" onclick="copyRoomLink()">🔗 Copy Room Link</button>
       <div id="schedLink"></div>
     </div>
     <button onclick="startMeeting()">Join Meeting</button>
@@ -259,10 +260,11 @@
   }
 
   function scheduleMeeting() {
-    const room = $('joinRoom').value.trim();
+    const room = $('joinRoom').value.trim() || 'leopards-zone';
+    $('joinRoom').value = room;
     const date = $('schedDate').value;
     const time = $('schedTime').value;
-    if (!room || !date || !time) { alert('Room ID, date aur time zaroori hai.'); return; }
+    if (!date || !time) { alert('Date aur time zaroori hai.'); return; }
     const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
     const linkBox = $('schedLink');
     linkBox.style.display = 'block';
@@ -270,6 +272,15 @@
     navigator.clipboard.writeText(url + '\n📅 Meeting: ' + date + ' ' + time + ' (Leopards MUX Zone Room)')
       .then(() => { toast('Link + schedule copied!'); })
       .catch(() => { toast('Copy failed — link neeche dikha hai'); });
+  }
+
+  function copyRoomLink() {
+    const room = $('joinRoom').value.trim() || 'leopards-zone';
+    $('joinRoom').value = room;
+    const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(room);
+    navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — open karein aur apna naam likh kar join karein')
+      .then(() => toast('Room link copied! ' + url))
+      .catch(() => toast(url));
   }
 
   async function startMeeting() {
@@ -483,6 +494,8 @@
       $('joinName').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') startMeeting();
       });
+    } else {
+      $('joinRoom').value = 'leopards-zone';
     }
   });
 
