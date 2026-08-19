@@ -566,6 +566,37 @@
     renderMembers();
   }
 
+  // sabko member list bhejo (mesh banane ke liye)
+  function broadcastMemberList() {
+    const members = Object.keys(memberMeta).map(id => ({ id, name: memberMeta[id].name }));
+    members.push({ id: peer.id, name: myName });
+    broadcast({ type: 'member-list', members });
+  }
+
+  // doosre member se direct connect (mesh) — audio/video sab tak pahunchta hai
+  const pendingConnects = {};
+  function connectToPeer(pid) {
+    if (pid === peer.id || connections[pid] || pendingConnects[pid]) return;
+    pendingConnects[pid] = true;
+    const c = peer.connect(pid);
+    c.on('open', () => {
+      delete pendingConnects[pid];
+      onConnected(c);
+    });
+    c.on('data', (d) => handleData(d, c));
+    c.on('close', () => {
+      delete pendingConnects[pid];
+      delete connections[pid];
+      delete memberMeta[pid];
+      detachAudio(pid);
+      removeVideoTile(pid);
+      detachScreenTile(pid);
+      delete receivingScreen[pid];
+      renderMembers();
+    });
+    c.on('error', () => { delete pendingConnects[pid]; });
+  }
+
   function handleIncomingCall(call) {
     const isScreen = !!receivingScreen[call.peer];
     if (isScreen) {
@@ -600,11 +631,25 @@
       if (d.isAdmin && d.hostKey) originalHostName = d.name;
       addChat('', `${d.name} joined`, true);
       renderMembers();
-      // sabko naye member ki info do
-      broadcast({ type: 'member-joined', id, name: d.name, muted: d.muted });
+      // host ho to sabko poori member list bhejo — taake members aapas mein mesh banayen
+      if (isAdmin) broadcastMemberList();
     } else if (d.type === 'member-joined') {
       memberMeta[d.id] = { name: d.name, muted: d.muted, hand: false, adminMuted: false };
       renderMembers();
+      connectToPeer(d.id);
+    } else if (d.type === 'member-left') {
+      if (memberMeta[d.id]) addChat('', `${memberMeta[d.id].name} left`, true);
+      delete memberMeta[d.id];
+      delete connections[d.id];
+      detachAudio(d.id);
+      removeVideoTile(d.id);
+      detachScreenTile(d.id);
+      delete receivingScreen[d.id];
+      renderMembers();
+    } else if (d.type === 'member-list') {
+      (d.members || []).forEach(m => {
+        if (m && m.id && m.id !== peer.id) connectToPeer(m.id);
+      });
     } else if (d.type === 'state') {
       if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
       memberMeta[id].muted = d.muted;
@@ -721,6 +766,7 @@
     const video = document.createElement('video');
     video.autoplay = true;
     video.playsInline = true;
+    video.muted = true; // audio alag element se aata hai — autoplay block na ho
     video.srcObject = stream;
     const label = document.createElement('div');
     label.className = 'label';
