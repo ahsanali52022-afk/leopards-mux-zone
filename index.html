@@ -378,8 +378,21 @@
       });
       myAudioTrack = myStream.getAudioTracks()[0] || null;
       myVideoTrack = myStream.getVideoTracks()[0] || null;
+      // agar mic nahi mila to mic OFF dikhao
+      if (!myAudioTrack) {
+        isMicOn = false;
+        $('btnMic').textContent = '🔇 Mic: OFF';
+        $('btnMic').className = 'off';
+      }
     } catch (e) {
       myStream = null; myAudioTrack = null; myVideoTrack = null;
+      // mic/camera permission denied ya unavailable — mic OFF dikhao
+      isMicOn = false;
+      isCamOn = false;
+      $('btnMic').textContent = '🔇 Mic: OFF';
+      $('btnMic').className = 'off';
+      $('btnCam').textContent = '🚫 Cam: OFF';
+      $('btnCam').className = 'off';
       toast('Mic/Camera nahi mili — text mode mein join ho gaye');
     }
     $('joinScreen').style.display = 'none';
