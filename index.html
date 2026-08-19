@@ -116,6 +116,15 @@
   .member.raised { border: 1px solid #fbbf24; }
   .member .muted-icon, .member .hand-icon { font-size: 13px; margin-left: auto; }
 
+  .screen-area { display: none; flex-direction: column; gap: 8px; }
+  .screen-area.active { display: flex; }
+  .screen-tile { position: relative; background: #0f172a; border-radius: 10px; overflow: hidden; border: 2px solid #4ade80; }
+  .screen-tile video { width: 100%; max-height: 300px; object-fit: contain; display: block; background: #000; }
+  .screen-tile .label {
+    position: absolute; bottom: 4px; left: 6px;
+    background: rgba(0,0,0,0.7); padding: 2px 10px; border-radius: 6px; font-size: 12px;
+  }
+
   .join-screen {
     position: fixed; inset: 0;
     background: #0f172a;
@@ -148,8 +157,9 @@
     background: #1e293b; color: #e2e8f0; font-size: 13px;
   }
   .schedule-box .sched-btn {
-    width: 100%; background: #fbbf24; color: #000; padding: 11px;
+    width: 100%; background: #fbbf24; color: #000; padding: 11px; margin-bottom: 6px;
   }
+  .schedule-box .sched-btn:last-of-type { margin-bottom: 0; }
   #schedLink {
     margin-top: 8px; padding: 9px; background: #1e293b; border-radius: 8px;
     font-size: 12px; color: #94a3b8; word-break: break-all; display: none;
@@ -207,6 +217,11 @@
   </div>
 
   <div class="right">
+    <div class="panel screen-area" id="screenArea">
+      <h2>🖥 Shared Screens</h2>
+      <div id="screenTiles"></div>
+    </div>
+
     <div class="panel">
       <h2>📝 Shared Notes</h2>
       <textarea id="notes" placeholder="Type notes here..."></textarea>
@@ -239,6 +254,7 @@
 
   const connections = {};       // peerId -> data connection
   const audioEls = {};          // peerId -> audio element
+  const screenCalls = {};       // peerId -> screen call (sharer side)
   const memberMeta = {};        // peerId -> {name, muted, hand}
 
   function $(id) { return document.getElementById(id); }
@@ -290,7 +306,10 @@
     myName = name; roomId = room;
 
     try {
-      myStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      myStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      });
       myAudioTrack = myStream.getAudioTracks()[0] || null;
     } catch (e) {
       myStream = null; myAudioTrack = null;
@@ -324,6 +343,7 @@
           conn.on('data', (d) => handleData(d, conn));
         });
         peer.on('error', (e) => { if (e.type !== 'peer-unavailable') console.warn(e); });
+        peer.on('call', (call) => handleIncomingCall(call));
       } else if (err.type === 'peer-unavailable') {
         toast('Room host offline ho gaye.');
       } else if (err.type !== 'browser-incompatible') {
@@ -335,12 +355,21 @@
       conn.on('open', () => onConnected(conn));
       conn.on('data', (d) => handleData(d, conn));
     });
-    peer.on('call', (call) => {
-      call.answer(myStream || undefined);
-      call.on('stream', (s) => {
+    peer.on('call', (call) => handleIncomingCall(call));
+  }
+
+  function handleIncomingCall(call) {
+    call.answer(); // no stream — audio aur screen alag calls handle hote hain
+    call.on('stream', (s) => {
+      if (s.getVideoTracks().length > 0) {
+        attachScreenTile(call.peer, s);
+      } else {
         attachAudio(call.peer, s);
-      });
-      call.on('close', () => detachAudio(call.peer));
+      }
+    });
+    call.on('close', () => {
+      detachAudio(call.peer);
+      detachScreenTile(call.peer);
     });
   }
 
@@ -371,6 +400,29 @@
     if (el) { el.srcObject = null; el.remove(); }
     delete audioEls[id];
     renderMembers();
+  }
+
+  function attachScreenTile(id, stream) {
+    const area = $('screenArea');
+    area.classList.add('active');
+    const tile = document.createElement('div');
+    tile.className = 'screen-tile';
+    tile.id = 'screen-' + id;
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = '🖥 ' + (memberMeta[id] ? memberMeta[id].name : 'Screen');
+    tile.appendChild(video);
+    tile.appendChild(label);
+    $('screenTiles').appendChild(tile);
+  }
+  function detachScreenTile(id) {
+    const el = document.getElementById('screen-' + id);
+    if (el) el.remove();
+    if ($('screenTiles').children.length === 0) $('screenArea').classList.remove('active');
   }
 
   function handleData(d, conn) {
@@ -448,7 +500,32 @@
       $('btnScreen').textContent = '🖥 Stop Share';
       $('btnScreen').className = 'off';
       toast('Screen sharing ON');
-      replaceAudioWithVideo();
+
+      // local preview
+      const area = $('screenArea');
+      area.classList.add('active');
+      const tile = document.createElement('div');
+      tile.className = 'screen-tile';
+      tile.id = 'screen-mine';
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = screenStream;
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = '🖥 ' + myName + ' (You)';
+      tile.appendChild(video);
+      tile.appendChild(label);
+      $('screenTiles').appendChild(tile);
+
+      // send to all peers
+      Object.keys(connections).forEach((pid) => {
+        const call = peer.call(pid, screenStream);
+        screenCalls[pid] = call;
+        call.on('close', () => { delete screenCalls[pid]; });
+      });
+
       screenStream.getVideoTracks()[0].onended = () => stopScreen();
     } catch (e) {
       toast('Screen share cancel ho gaya');
@@ -456,6 +533,9 @@
   }
 
   function stopScreen() {
+    if (!isScreenOn) return;
+    Object.values(screenCalls).forEach(c => { try { c.close(); } catch(e) {} });
+    screenCalls = {};
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
       screenStream = null;
@@ -463,22 +543,15 @@
     isScreenOn = false;
     $('btnScreen').textContent = '🖥 Screen Share';
     $('btnScreen').className = '';
-    if (myStream) replaceAudioWithVideo();
+    detachScreenTile('mine');
     toast('Screen sharing OFF');
-  }
-
-  function replaceAudioWithVideo() {
-    Object.values(connections).forEach((conn) => {
-      try {
-        const sender = conn.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-        if (sender) sender.replaceTrack(isScreenOn && screenStream ? screenStream.getVideoTracks()[0] : null);
-      } catch (e) {}
-    });
   }
 
   function copyLink() {
     const url = location.href.split('#')[0] + '#room=' + encodeURIComponent(roomId);
-    navigator.clipboard.writeText(url).then(() => toast('Room link copied!')).catch(() => toast(url));
+    navigator.clipboard.writeText(url + '\nLeopards MUX Zone Room — open karein aur apna naam likh kar join karein')
+      .then(() => toast('Room link copied!'))
+      .catch(() => toast(url));
   }
 
   // auto-join from URL hash
