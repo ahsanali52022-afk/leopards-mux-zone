@@ -204,6 +204,9 @@
     <p>50 log tak. Name + Room ID se join karein.</p>
     <input id="joinName" type="text" placeholder="Your name" maxlength="30" onkeydown="if(event.key==='Enter')startMeeting()">
     <input id="joinRoom" type="text" placeholder="Room ID (e.g. logistics-1)" maxlength="40">
+    <div id="expiredMsg" style="display:none;background:#dc2626;color:#fff;padding:10px;border-radius:8px;margin-bottom:10px;font-size:14px;">
+      ❌ Ye link expire ho chuka hai. Nayi meeting banane ke liye neeche button dabayen.
+    </div>
     <div class="schedule-box">
       <h3>📅 Meeting Schedule</h3>
       <input id="schedDate" type="date">
@@ -212,6 +215,7 @@
       <button class="sched-btn" style="background:#4ade80;" onclick="copyRoomLink()">🔗 Copy Room Link</button>
       <div id="schedLink"></div>
     </div>
+    <button id="newRoomBtn" onclick="makeNewRoom()" style="display:none;background:#4ade80;color:#000;font-weight:700;">🆕 Nayi Meeting Banao (New Link)</button>
     <button onclick="startMeeting()">Join Meeting</button>
     <p class="hint">Same Room ID par sab join karein. Mic permission allow karein.</p>
   </div>
@@ -638,7 +642,8 @@
       receivingScreen[id] = false;
       detachScreenTile(id);
     } else if (d.type === 'meeting-end') {
-      // host ne meeting khatam kardi
+      // host ne meeting khatam kardi — link expire
+      expireRoom(roomId);
       toast('👋 Host ne meeting end kar di');
       setTimeout(() => { location.hash = ''; location.reload(); }, 2000);
     } else if (d.type === 'chat') {
@@ -978,6 +983,8 @@
   // meeting khatam karo — sab ko batao aur yeh page se bahar nikal jao
   function endMeeting() {
     if (!confirm('Meeting end karni hai? Sab participants disconnect ho jayenge.')) return;
+    // link turant expire karo
+    expireRoom(roomId);
     // sabko end ka message bhejo
     broadcast({ type: 'meeting-end' });
     // screen share band karo
@@ -1002,6 +1009,22 @@
       .catch(() => toast(url));
   }
 
+  // meeting end hone par link expire — localStorage mein room ko mark kar do
+  function expireRoom(r) {
+    try { localStorage.setItem('lmz-ended-' + r, '1'); } catch(e) {}
+  }
+
+  function makeNewRoom() {
+    // purana expire mark hatao aur naya room banao
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.indexOf('lmz-ended-') === 0) localStorage.removeItem(k);
+      });
+    } catch(e) {}
+    location.hash = '';
+    location.reload();
+  }
+
   // auto-join from URL hash
   window.addEventListener('load', () => {
     const hash = location.hash;
@@ -1009,6 +1032,19 @@
     const room = params.get('room') || '';
     hostKey = params.get('host') || '';
     if (room) {
+      // meeting end ho chuki hai to link expire
+      let ended = false;
+      try { ended = localStorage.getItem('lmz-ended-' + room) === '1'; } catch(e) {}
+      if (ended) {
+        $('joinRoom').value = room;
+        $('joinRoom').style.display = 'none';
+        $('schedDate').parentElement.style.display = 'none';
+        $('schedTime').parentElement.style.display = 'none';
+        $('expiredMsg').style.display = 'block';
+        $('newRoomBtn').style.display = 'block';
+        $('joinName').style.display = 'none';
+        return;
+      }
       $('joinRoom').value = room;
       $('joinRoom').style.display = 'none';
       $('schedDate').parentElement.style.display = 'none';
