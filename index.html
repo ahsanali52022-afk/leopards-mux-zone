@@ -115,6 +115,12 @@
   .member.muted .dot { background: #dc2626; }
   .member.raised { border: 1px solid #fbbf24; }
   .member .muted-icon, .member .hand-icon { font-size: 13px; margin-left: auto; }
+  .member .admin-mute {
+    margin-left: 6px; padding: 3px 8px; border: none; border-radius: 6px;
+    background: #dc2626; color: #fff; font-size: 12px; cursor: pointer;
+  }
+  .member .admin-mute:hover { background: #ef4444; }
+  .member.admin { border: 1px solid #fbbf24; }
 
   .screen-area { display: none; flex-direction: column; gap: 8px; }
   .screen-area.active { display: flex; }
@@ -251,11 +257,13 @@
   let isMicOn = true;
   let isScreenOn = false;
   let handRaised = false;
+  let isAdminMuted = false;
 
   const connections = {};       // peerId -> data connection
   const audioEls = {};          // peerId -> audio element
   const screenCalls = {};       // peerId -> screen call (sharer side)
   const memberMeta = {};        // peerId -> {name, muted, hand}
+  let isAdmin = false;          // room host (link share karne wala)
 
   function $(id) { return document.getElementById(id); }
   function toast(msg) {
@@ -322,9 +330,10 @@
   function setupPeer() {
     peer = new Peer(roomId);
     peer.on('open', () => {
-      $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b>`;
+      isAdmin = true; // room host = admin (link share karne wala)
+      $('roomStatus').innerHTML = `Room: <b>${roomId}</b> — as <b>${myName}</b> 👑 Admin`;
       renderMembers();
-      addChat('', `You joined the room (${roomId})`, true);
+      addChat('', `You joined the room (${roomId}) — Aap admin hain`, true);
     });
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id') {
@@ -428,20 +437,45 @@
   function handleData(d, conn) {
     const id = conn.peer;
     if (d.type === 'hello') {
-      memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand };
+      memberMeta[id] = { name: d.name, muted: d.muted, hand: d.hand, adminMuted: false };
       addChat('', `${d.name} joined`, true);
       renderMembers();
     } else if (d.type === 'state') {
-      if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false };
+      if (!memberMeta[id]) memberMeta[id] = { name: 'Member', muted: false, hand: false, adminMuted: false };
       memberMeta[id].muted = d.muted;
       memberMeta[id].hand = d.hand;
       renderMembers();
+    } else if (d.type === 'admin-mute') {
+      // admin ne mic off/on kiya
+      if (d.muted) {
+        isAdminMuted = true;
+        if (isMicOn) toggleMic();
+        toast('👑 Admin ne aapka mic mute kar diya');
+      } else {
+        isAdminMuted = false;
+        toast('👑 Admin ne mic un-mute kar diya');
+      }
     } else if (d.type === 'chat') {
       const meta = memberMeta[id] || { name: 'Member' };
       addChat(meta.name, d.text);
     } else if (d.type === 'notes') {
       $('notes').value = d.text;
     }
+  }
+
+  function adminToggleMic(peerId) {
+    if (!isAdmin) return;
+    const m = memberMeta[peerId];
+    if (!m) return;
+    const newMuted = !m.adminMuted;
+    m.adminMuted = newMuted;
+    m.muted = newMuted;
+    const conn = connections[peerId];
+    if (conn) {
+      try { conn.send({ type: 'admin-mute', muted: newMuted }); } catch(e) {}
+    }
+    renderMembers();
+    toast(newMuted ? 'Member ka mic mute kar diya' : 'Member ka mic on kar diya');
   }
 
   function broadcast(data) {
@@ -455,8 +489,8 @@
     box.innerHTML = '';
     let count = 1;
     const me = document.createElement('div');
-    me.className = 'member' + (!isMicOn ? ' muted' : '') + (handRaised ? ' raised' : '');
-    me.innerHTML = `<span class="dot"></span><span>${escapeHtml(myName)} (You)</span>` +
+    me.className = 'member' + (!isMicOn ? ' muted' : '') + (handRaised ? ' raised' : '') + (isAdmin ? ' admin' : '');
+    me.innerHTML = `<span class="dot"></span><span>${escapeHtml(myName)} ${isAdmin ? '👑' : ''} (You)</span>` +
       (!isMicOn ? '<span class="muted-icon">🔇</span>' : '') +
       (handRaised ? '<span class="hand-icon">🙋</span>' : '');
     box.appendChild(me);
@@ -465,9 +499,13 @@
       count++;
       const el = document.createElement('div');
       el.className = 'member' + (m.muted ? ' muted' : '') + (m.hand ? ' raised' : '');
+      const muteBtn = isAdmin
+        ? `<button class="admin-mute" onclick="adminToggleMic('${id}')">${m.adminMuted ? '🔊' : '🔇'}</button>`
+        : '';
       el.innerHTML = `<span class="dot"></span><span>${escapeHtml(m.name)}</span>` +
         (m.muted ? '<span class="muted-icon">🔇</span>' : '') +
-        (m.hand ? '<span class="hand-icon">🙋</span>' : '');
+        (m.hand ? '<span class="hand-icon">🙋</span>' : '') +
+        muteBtn;
       box.appendChild(el);
     });
     $('memberCount').textContent = count;
@@ -476,6 +514,7 @@
   // ---- Controls ----
   function toggleMic() {
     if (!myAudioTrack) { toast('Mic available nahi'); return; }
+    if (isAdminMuted) { toast('👑 Admin ne mic mute kiya hai — aap khud on nahi kar sakte'); return; }
     isMicOn = !isMicOn;
     myAudioTrack.enabled = isMicOn;
     $('btnMic').textContent = isMicOn ? '🎤 Mic: ON' : '🔇 Mic: OFF';
