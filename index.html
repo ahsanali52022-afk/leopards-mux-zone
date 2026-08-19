@@ -811,6 +811,8 @@
 
   async function toggleScreen() {
     if (isScreenOn) { stopScreen(); return; }
+    // pehle window kholo (user gesture ke andar) taake browser block na kare
+    openScreenWindow();
     try {
       // audio:false — system audio off (echo fix). Awaz mic se hi jayegi
       screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
@@ -818,6 +820,15 @@
       $('btnScreen').textContent = '🖥 Stop Share';
       $('btnScreen').className = 'off';
       toast('Screen sharing ON');
+
+      // popup window mein stream laga do
+      if (screenWin && !screenWin.closed) {
+        try {
+          const wv = screenWin.document.querySelector('video');
+          if (wv) wv.srcObject = screenStream;
+        } catch(e) {}
+      }
+      addLocalScreenTile();
 
       // har peer ko batao ke ye screen call hai (echo/double-audio fix)
       Object.keys(connections).forEach((pid) => {
@@ -830,11 +841,10 @@
         });
       });
 
-      // alag window mein screen dikhao (Zoom jaisa)
-      openScreenWindow();
-
       screenStream.getVideoTracks()[0].onended = () => stopScreen();
     } catch (e) {
+      if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(err) {} }
+      screenWin = null;
       toast('Screen share cancel ho gaya');
     }
   }
@@ -845,7 +855,7 @@
   function openScreenWindow() {
     if (screenWin && !screenWin.closed) { try { screenWin.close(); } catch(e) {} }
     screenWin = window.open('', 'lmzScreen', 'width=900,height=600,resizable=yes');
-    if (!screenWin) { toast('Popup block — screen yahan dikhegi'); addLocalScreenTile(); startScreenWinCheck(); return; }
+    if (!screenWin) return; // popup block — addLocalScreenTile() baad mein call hoga
     const html = `<html><head><title>🖥 Screen Share — ${escapeHtml(myName)}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -860,8 +870,6 @@
       <div class="bar"><h2>🖥 Screen Share — ${escapeHtml(myName)}</h2><button onclick="window.opener.stopScreen();">⏹ Stop Sharing</button></div>
       <video autoplay muted playsinline></video>
       <script>
-        const v = document.querySelector('video');
-        v.srcObject = window.opener.screenStream;
         // window close hone par sharing stop
         window.addEventListener('beforeunload', function(){ try { window.opener.stopScreen(); } catch(e){} });
       <\/script>
